@@ -1,130 +1,143 @@
+# ============================================================
+# 128model_Train.py
+# ------------------------------------------------------------
+# このスクリプトは，3次元胸部CT画像を用いて VoxelMorph 系の
+# 位置合わせモデルを学習するためのコードです。
+# 
+# 大きく 2 段階の学習を行っています。
+# 1. 人工的に作った変形場を使った事前学習
+#    - 正解の変形場が分かる状態で，変形ベクトル場の予測を学ぶ
+# 2. 実際の画像ペアを用いた追加学習
+#    - 画像同士が似るように位置合わせを学ぶ
+# 
+# 主な流れは次の通りです。
+# 1. CT データを読み込んでサイズをそろえる
+# 2. moving / fixed 画像ペアを作るジェネレータを準備する
+# 3. 事前学習で人工変形場を使って学習する
+# 4. 学習済み重みを初期値にして追加学習する
+# 5. 学習済みモデルを保存する
+# 
+# このコードは「学習用」のスクリプトであり，評価や可視化だけを
+# 行うテストコードとは役割が異なります。
+# ============================================================
+
+# 標準ライブラリ
 import os
 import os, sys
-import numpy as np	# •	numpy：配列処理や数値計算のライブラリ
-import torch	# •	torch：PyTorch本体
-import torch.nn as nn    # •	torch.nn：ニューラルネットワークのモジュール
-import torch.nn.functional as F	# •	torch.nn.functional：活性化関数や畳み込みなどの関数
-from torch.nn import Sequential	# •	torch.nn.Sequential：層を順番に積み重ねるためのクラス
-import torch.optim as optim	# •	torch.optim：最適化アルゴリズムのライブラリ
-import voxelmorph as vxm	# •	voxelmorph as vxm：位置合わせモデルのライブラリ
-import neurite as ne	# •	neurite as ne：医用画像処理のライブラリ
-import scipy.ndimage	# •	scipy.ndimage：画像のリサイズや平滑化などの処理を行うライブラリ
+# 数値計算・深層学習関連
+import numpy as np  # 配列処理や数値計算に使う
+import torch  # PyTorch 本体
+import torch.nn as nn  # ニューラルネットワークの層やモジュール
+import torch.nn.functional as F  # 活性化関数や畳み込み演算など
+from torch.nn import Sequential  # 層を順番に積み重ねるクラス
+import torch.optim as optim  # 最適化アルゴリズム
+# VoxelMorph / 医用画像処理関連
+import voxelmorph as vxm  # VoxelMorph のライブラリ
+import neurite as ne  # 医用画像処理関連の補助ライブラリ
+import scipy.ndimage  # 画像の補間や平滑化に使う
 
-	# •	VoxelMorph のバックエンドを PyTorch に設定
+# VoxelMorph のバックエンドとして PyTorch を使うように指定する
 os.environ['VXM_BACKEND'] = 'pytorch'
 os.environ.get('VXM_BACKEND')
-# •	GPU が使えれば GPU、なければ CPU を使う
+
+# GPU が使えれば GPU を，使えなければ CPU を使う
+# この device を使って，モデルやテンソルを同じ計算環境に載せる
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-# device はこのあと tensor や model を GPU に送るために使います。
+# 実際にどの計算環境が選ばれたかを表示する
 print(device)
 
-# 画像を読み込み
-# ここで .npz ファイルから Train という名前のデータを読み込んでいます。
-# transpose は軸の順番を変える処理です。
-# もともとのデータがたとえば (H, W, D, N) みたいな並びだったものを、
-# (N, H, W, D) のように**「最初の次元が症例番号」**になるように変えている可能性が高いです。
-# つまり、
-# 	•	x_train[0] が 1症例分の3D画像
-# という形にそろえています。
+# =====================
+# 学習データの読み込みと前処理
+# =====================
+# 学習用の CT ボリュームを .npz ファイルから読み込む
 x_train = np.load('D:\Saito\Data\TrainData_NoBed.npz')['Train']
+
+# 軸の並びを入れ替えて，先頭次元が「症例番号」になる形にそろえる
+# これにより x_train[0] が 1症例分の 3D 画像になる
 x_train = np.transpose(x_train, (3, 0, 1, 2))
 
-# ここでは各3D画像を縦・横・奥行き全部半分にしています。
-# 理由としてはたぶん、
-# 	•	3D CT はサイズが大きい
-# 	•	そのままだとGPUメモリが重い
-# 	•	学習時間もかかる
-# からです。
-# order=3 は3次の補間で、比較的なめらかに縮小しています。
-# 新しいボリュームのサイズ (各軸を半分にする)
+# 元の 3D 画像は大きいため，各軸を半分にしてメモリ負荷を下げる
+# ここで縮小後のサイズを計算する
 new_shape = tuple([dim // 2 for dim in x_train.shape[1:]])
 
-# サイズを半分に縮小
+# 全症例を順番に補間して縮小する
 x_train_resized = np.zeros((x_train.shape[0], *new_shape))  # 新しい形に合わせて初期化
 
 for i in range(x_train.shape[0]):
-    # 各画像を縮小
+    # 1症例ずつ 3次元補間で縮小する
     x_train_resized[i] = scipy.ndimage.zoom(x_train[i], (0.5, 0.5, 0.5), order=3)
+# 縮小後の 1症例あたりのサイズと，全体のデータ数を確認する
 print('Resized train vol_shape:', x_train_resized.shape[1:])
 print('Resized train shape:', x_train_resized.shape)
 
-# 縮小後の画像を学習用データとして使う
+# 縮小後の画像を以後の学習データとして使う
 x_train = x_train_resized
-import torch
 
-# この関数は、学習のたびに
-# 	•	moving_images
-# 	•	fixed_images
-# をランダムに作る関数です。
+# =====================
+# 学習用データジェネレータ
+# =====================
+# 学習時に moving / fixed の画像ペアをランダムに作る関数
 def vxm_data_generator(x_data, batch_size):
     vol_shape = x_data.shape[1:]  # データ形状を取得
+    # 1症例あたりの 3D ボリュームサイズを表す
     ndims = len(vol_shape)
     
-#     これはゼロの変形場です。
-# VoxelMorph の標準的な出力形式に合わせるために用意しているものです。
+    # 変形なしを表すゼロの変形場を用意する
     zero_phi = np.zeros([batch_size, *vol_shape, ndims])
     
     while True:
-#         ここでランダムに症例を選んで、
-# 	•	Moving画像
-# 	•	Fixed画像
-# を別々に取っています。
-# つまり、同じ患者の時系列ペアではなく、ランダムな画像ペアです。
+        # バッチサイズ分だけランダムに症例を選び，moving 画像を作る
         idx1 = np.random.randint(0, x_data.shape[0], size=batch_size)
         moving_images = x_data[idx1, ..., np.newaxis]
+        # 別にランダム抽出して fixed 画像を作る
         idx2 = np.random.randint(0, x_data.shape[0], size=batch_size)
         fixed_images = x_data[idx2, ..., np.newaxis]
 
-        # TensorFlowからPyTorchのデータ形式に変換
-#         形を
-# (B, C, D, H, W) かそれに近い PyTorch 用の形式にしています。
+        # PyTorch で扱いやすい (B, C, D, H, W) 形式に並べ替える
         moving_images = torch.tensor(moving_images).permute(0, 4, 1, 2, 3).float()
         fixed_images = torch.tensor(fixed_images).permute(0, 4, 1, 2, 3).float()
-        # チャンネルを最初の次元に追加
-        moving_images = moving_images.permute(0, 1, 2, 3, 4)  # チャンネルを最初の次元に移動
-        fixed_images = fixed_images.permute(0, 1, 2, 3, 4)  # チャンネルを最初の次元に移動
-
+        # モデル入力と，学習時に参照する出力側のターゲットを作る
         inputs = [moving_images, fixed_images]
         outputs = [fixed_images, zero_phi]
 
         yield (inputs, outputs)
 
-#         ここは実際に1回生成してみて、
-# 	•	Moving画像のshape
-# 	•	Fixed画像のshape
-# 	•	出力のshape
-# を確認しています。
-# これはデバッグ用です。
+# 実際に 1バッチ取り出して，入力と出力の形が想定通りか確認する
 train_generator = vxm_data_generator(x_train, batch_size=2)
 in_sample, out_sample = next(train_generator)
 
 # in_sampleとout_sampleの内容を確認する
-print("Input Sample Shapes:")
-print("Moving Images Shape:", in_sample[0].shape)
-print("Fixed Images Shape:", in_sample[1].shape)
+print("入力サンプルの形状:")
+print("Moving画像の形状:", in_sample[0].shape)
+print("Fixed画像の形状:", in_sample[1].shape)
 
-print("\nOutput Sample Shapes:")
-print("Moved Images (Fixed) Shape:", out_sample[0].shape)
-print("Zero Gradient Shape:", out_sample[1].shape)
+print("\n出力サンプルの形状:")
+print("変形後画像（学習ターゲット）の形状:", out_sample[0].shape)
+print("ゼロ変形場の形状:", out_sample[1].shape)
 
-# 7. 損失関数の定義
-# ここで2種類の損失を用意しています。
-# 	•	MSE：画像の差を測る
+# =====================
+# 損失関数
+# =====================
+# 画像同士の差と，変形の滑らかさに関する損失を定義する
 mse_loss = vxm.losses.MSE().loss
+# Grad 損失は，変形場が急激に変わりすぎないようにするための正則化
 grad_loss = vxm.losses.Grad('l2').loss
 
+# MSE と Grad を合わせた総損失
 def total_loss(y_true, y_pred):
     mse = mse_loss(y_true, y_pred)
     grad = grad_loss(y_true, y_pred)
     return mse + 0.01 * grad, mse, grad
-#     return mse_loss(y_true, y_pred)
 
+# MSE だけを取り出して使いたいときの補助関数
 def MSE_Loss(y_true, y_pred):
     mse = mse_loss(y_true, y_pred)
     return mse
 
+# 局所正規化相互相関（LNCC）の損失関数
+# このコードでは最終的に使っていないが，候補として残されている
 def lncc_loss(I, J, window=9, eps=1e-5):
-    # I, J: (B, 1, D, H, W)
+    # I, J は (B, 1, D, H, W) 形状の 3次元画像バッチを想定する
     padding = window // 2
     weight = torch.ones(1, 1, window, window, window, device=I.device)
 
@@ -147,236 +160,175 @@ def lncc_loss(I, J, window=9, eps=1e-5):
     J_var = J2_sum - 2 * u_J * J_sum + u_J * u_J * win_size
 
     lncc = cross * cross / (I_var * J_var + eps)
-    return -torch.mean(lncc)  # maximize LNCC → minimize -LNCC
-# configure unet input shape (concatenation of moving and fixed images)
+    return -torch.mean(lncc)  # LNCC を大きくしたいので，損失としてはマイナスを付けて最小化する
+
+# =====================
+# モデル設定
+# =====================
+# 3次元画像を扱うので次元数は 3
+# moving と fixed を合わせて扱う位置合わせモデルを構成する
 ndim = 3
 unet_input_features = 2
-# inshape = (*x_train.shape[1:], unet_input_features)
 
+# U-Net の encoder / decoder で使うチャネル数
 nb_features = [
     [32, 64, 64, 64, 64],
     [64, 64, 64, 64, 64, 32, 16, 16]
 ]
 
+# VoxelMorph 系の 3D モデルを作成する
+# 入力サイズは (64, 128, 128)
 model3D = vxm.networks.VxmDense1((64, 128, 128), nb_features, int_steps=0)
 model3D.to(device)
 optimizer = optim.Adam(model3D.parameters(), lr=1e-4)
+
+# 画像再現損失と変形場損失の重み
 A = 100
 B = 0.01
-# NotdecoderHight
+
+# 学習の進み具合を notebook 上で見やすくするためのライブラリ
 from tqdm.notebook import tqdm
 from IPython.display import clear_output
 import matplotlib.pyplot as plt
 
-# 10. Spatial Transformer
-# これは変形場を使って画像をワープする層です。
-# つまり、
-# 	•	変位ベクトル場 displacement_field
-# 	•	Moving画像
-# があれば、
-# 	•	変形後画像
-# を作れます。
-# これは人工変形データを作るのに使っています。
+# Spatial Transformer は，変形場を使って画像を実際にワープする層
 transformer = vxm.layers.SpatialTransformer((64, 128, 128)).to(device)
 
-# 11. ガウシアン平滑化関数
-# 3D ガウシアンフィルタを適用する関数
+# 人工的に作った変形場を滑らかにして，不自然なギザギザを減らす関数
 def gaussian_smooth_3d(tensor, kernel_size=5, sigma=1.0):
-    """ 3D ガウシアンフィルタで displacement field をスムージング """
-    # 3D Gaussian Kernel の作成
+    """3次元ガウシアンフィルタで変形場をなめらかにする。"""
+    # scipy のガウシアンフィルタを使って平滑化する
     from scipy.ndimage import gaussian_filter
     tensor_np = tensor.cpu().numpy()
-#     中では
-#     	•	バッチ方向
-# 	•	チャネル方向
-# には平滑化せず、
-# 	•	3D空間方向
-# だけ平滑化しています。
-# つまり、ランダムな変位場をそのまま使うのではなく、
-# なめらかで自然な変形に近づけています。
-    smoothed_np = gaussian_filter(tensor_np, sigma=[0, 0, sigma, sigma, sigma])  # チャネル方向にはフィルタ適用しない
+    # バッチ方向・チャネル方向にはフィルタをかけない
+    smoothed_np = gaussian_filter(tensor_np, sigma=[0, 0, sigma, sigma, sigma])
     return torch.tensor(smoothed_np, dtype=torch.float32, device=tensor.device)
 
-# 12. 事前学習っぽい段階
-# エポック数と最小ロスの設定
-# 人工的な正解変形場を作って、その変形をモデルに学ばせているように見えます
+# =====================
+# 第1段階: 人工変形場を使った事前学習
+# =====================
 epochs = 40000
-best_loss = float('inf')
+# 最初は小さい変形だけを学ばせ，あとで徐々に大きな変形にする
 shift_range = 1
 
-# ロスや他のメトリクスを記録するリスト
+# 損失の推移をあとで確認できるように記録しておく
 losses = []
 loss_vecs = []
 loss_images = []
 loss_hightVecs = []
-for epoch in tqdm(range(epochs)):
-    # 100エポックごとにshift_rangeを増やす
-#     これは1000エポックごとに変形の大きさを増やしています。
-# 最初は小さい変形だけ学ばせて、
-# だんだん大きい変形にするので、easy-to-hard の学習になっています。
-# これは論文でいう curriculum learning に近い考え方です。
-    if epoch % 1000 == 0 and epoch > 0:
-        shift_range += 1
-        print(f"Epoch {epoch}: Increasing shift range to ±{shift_range} pixels.")
 
-    # 学習データのバッチを取得
+# 事前学習のメインループ
+for epoch in tqdm(range(epochs)):
+    # 一定エポックごとに人工変形の大きさを増やして，学習難易度を上げる
+    if epoch % 1000 == 0 and epoch > 0:
+        print(f"Epoch {epoch}: 人工変形の大きさを ±{shift_range} ボクセルに増やします。")
+        shift_range += 1
+
+    # 取り出した moving 画像を Tensor にして device に載せる
     train_batch, _ = next(train_generator)
     moving_images = torch.tensor(train_batch[0], dtype=torch.float32).to(device)
 
-# 14. 人工変形場の作成
-    # 画像サイズを設定
+    # ひとつ前の更新でたまった勾配をリセットする
+    optimizer.zero_grad()
+
+    # まず粗い解像度でランダムな変形場を作る
     B, D, H, W = 2, 8, 16, 16  # バッチサイズと画像の次元
 
-    # displacement_field をボクセルごとにランダムに作成
-#     ここではランダムな displacement field を作っています。
-# 	•	B=2：バッチサイズ
-# 	•	3：x, y, z の3方向
-# 	•	D, H, W = 8,16,16：粗い解像度でまず作る
-# つまり最初は低解像度のランダム変形場を作ります。
+    # x, y, z の3方向にランダムな変位を与える
     displacement_field = (torch.rand((B, 3, D, H, W), dtype=torch.float32) * 2 - 1) * shift_range
     displacement_field = displacement_field.to(device)
 
-    # 3D Gaussian Smoothing を適用
-    # そのあと、
-# 1.	ガウシアンでなめらかにする
-# 	2.	本来の画像サイズに拡大する
-# という処理をしています。
-# これで、より自然な3D変形場になります。
+    # 変形場を滑らかにしてから，画像サイズまで拡大する
     displacement_field = gaussian_smooth_3d(displacement_field, sigma=2.0)
     displacement_field = torch.nn.functional.interpolate(displacement_field, size=(64,128,128), mode='trilinear', align_corners=False)
 
-    # 位置をずらした画像を生成
-    # 15. 人工的に変形した画像を作る
-#     これは
-# 	•	元の moving_images
-# 	•	人工変形場 displacement_field
-# を使って、
-# 	•	変形後の画像 moving_images2
-# を作っています。
-# つまり moving_images2 は、
-# 元画像を既知の変形でずらした画像です。
+    # 正解となる人工変形画像を作る
     moving_images2 = transformer(moving_images, displacement_field)
 
-    # 勾配を初期化
-    optimizer.zero_grad()
-
-    # 順伝播
-    # 16. モデルに予測させる
-#     ここではモデルに
-# 	•	Moving = 元画像
-# 	•	Fixed = 人工変形後画像
-# を入力しています。
-# するとモデルは
-# 	•	transformed_image：Moving を Fixed に合わせた結果
-# 	•	Vec：推定した変位ベクトル場
-# を返します。
+    # モデルに元画像と人工変形後画像を入力し，位置合わせ結果と変形場を予測させる
     transformed_image, Vec = model3D(moving_images, moving_images2)
 
-# 17. 損失
-# 予測した変形場 Vec が、
-# 人工的に作った正解変形場 displacement_field に近いかを見ています。
-# つまりDVFの教師あり学習です。
+    # 予測した変形場が，人工的に作った正解変形場に近いかを評価する
     loss_vec = MSE_Loss(displacement_field, Vec) * B
-#     変形後の画像 transformed_image が、
-# 人工的に作った正解画像 moving_images2 に近いかを見ています。
-# つまり画像再現の誤差です。
+    # 変形後画像が，人工的に作った正解画像に近いかを評価する
     loss_image = MSE_Loss(moving_images2, transformed_image) * A
-    
+
+    # 2つの損失を合わせて最終的な学習目標にする
     loss = loss_vec + loss_image
 
-# 18. 学習の更新
-    # 逆伝播
+    # 逆伝播してパラメータを更新する
     loss.backward()
     optimizer.step()
 
-# 19. モデル保存と可視化
-# 100エポックごとに保存しています。
+    # 一定間隔で学習済み重みを保存する
     if (epoch + 1) % 100 == 0:
         torch.save(
             model3D.state_dict(),
             f'a.pth'
         )
         
-
+    # 可視化用に損失を保存する
     losses.append(loss.cpu().item())
     loss_vecs.append(loss_vec.cpu().item())
     loss_images.append(loss_image.cpu().item())
 
-    # 100エポックごとにグラフを更新
-    # loss の推移を notebook 上に表示しています。
+    # notebook 上で損失の推移を確認する
     if epoch % 10 == 0:
         clear_output(wait=True)  # 出力をリフレッシュ
         plt.figure(figsize=(10,5))
-        plt.plot(losses, label='Loss')
-        plt.plot(loss_vecs, label='loss_vecs')
-        plt.plot(loss_images, label='loss_images')
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.title("Training Loss Progress")
+        plt.plot(losses, label='総損失')
+        plt.plot(loss_vecs, label='変形場損失')
+        plt.plot(loss_images, label='画像損失')
+        plt.xlabel("エポック")
+        plt.ylabel("損失")
+        plt.title("学習中の損失の推移")
         plt.legend()
         plt.grid(True)
         plt.show()
     
     # エポックごとのロスの表示
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {loss:.4f}, loss_vec: {loss_vec:.4f}, loss_image: {loss_image:.4f}, Shift Range: ±{shift_range} pixels")
+    print(f"Epoch {epoch+1}/{epochs}, 総損失: {loss:.4f}, 変形場損失: {loss_vec:.4f}, 画像損失: {loss_image:.4f}, 変形幅: ±{shift_range} ボクセル")
 
-# 20. 学習済みモデルを読み直す
-# ここでは、1段階目で学習した a.pth を読み込んでいます。
-# つまりこの2段階目は、
-# 事前学習済みモデルを初期値として本学習する段階です。
+# =====================
+# 第2段階: 実画像ペアを使った追加学習
+# =====================
+# 第1段階で保存した重みを読み込んで初期値にする
 model3D = vxm.networks.VxmDense1((64, 128, 128), nb_features, int_steps=0)
 model3D.load_state_dict(torch.load('a.pth', map_location=device))
 model3D.to(device)
 optimizer = optim.Adam(model3D.parameters(), lr=1e-4)
 
-from tqdm.notebook import tqdm
-
-# 21. 2段階目の学習ループ
-# エポック数と最小ロスの設定
-# 本来の位置合わせ学習
+# 第2段階では，人工変形を使わずに画像類似度ベースで学習する
 epochs = 10000
 
-# ロスや他のメトリクスを記録するリスト
+# 第2段階でも損失の推移を記録する
 losses = []
 
+# 追加学習のメインループ
 for epoch in tqdm(range(epochs)):
 
-# 22. Moving と Fixed をそのまま使う
-    # 学習データのバッチを取得
-#     今度は人工変形を作らずに、
-# 	•	ランダムに選んだ moving
-# 	•	ランダムに選んだ fixed
-# をそのまま使っています。
+    # moving / fixed を Tensor にして device に載せる
     train_batch, _ = next(train_generator)
     moving_images = torch.tensor(train_batch[0], dtype=torch.float32).to(device)
     fixed_images = torch.tensor(train_batch[1], dtype=torch.float32).to(device)
 
-    # 勾配を初期化
+    # 勾配を初期化する
     optimizer.zero_grad()
 
-# 23. 推論と損失
-# ここでは、Moving を Fixed に合わせた結果 transformed_image と、
-# Fixed 画像との MSE を最小化しています。
-# つまりこの段階では、
-# 	•	画像が似るようにする
-# だけで学習しています。
-# 変形場 Vec に対する教師あり損失は使っていません。
-# これは通常の非教師あり registration に近いです。
-    # 順伝播
+    # moving を fixed に合わせるように推論する
     transformed_image, Vec = model3D(moving_images, fixed_images)
-    # 損失を計算
+    # 変形後画像と fixed 画像の差を損失として計算する
     loss = MSE_Loss(fixed_images, transformed_image)
 
-    # 逆伝播
+    # 逆伝播して重みを更新する
     loss.backward()
     optimizer.step()
 
-# 24. 保存
-    # モデルを保存
+    # 現時点のモデル重みを保存する
     torch.save(model3D.state_dict(), 'a2.pth')
 
-    # エポックごとのロスを保存
+    # 損失を記録して，学習の進み具合を確認できるようにする
     losses.append(loss.cpu().item())
     
     # エポックごとのロスの表示
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {loss:.4f}")
+    print(f"Epoch {epoch+1}/{epochs}, 損失: {loss:.4f}")
