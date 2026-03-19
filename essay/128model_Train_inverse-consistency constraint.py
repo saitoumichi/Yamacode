@@ -1,3 +1,4 @@
+# %%
 # ============================================================
 # 128model_Train_inverse-consistency constraint.py
 # ------------------------------------------------------------
@@ -36,7 +37,13 @@ import scipy.ndimage
 
 # VoxelMorph のバックエンドとして PyTorch を使うように指定する
 os.environ['VXM_BACKEND'] = 'pytorch'
+# %%
+
+# %%
 os.environ.get('VXM_BACKEND')
+# %%
+
+# %%
 
 # GPU が使えれば GPU を，使えなければ CPU を使う
 # この device を使って，モデルやテンソルを同じ計算環境に載せる
@@ -44,6 +51,10 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 実際にどの計算環境が選ばれたかを表示する
 print(device)
+# %%
+
+# %%
+# 画像を読み込み
 
 # =====================
 # 学習データの読み込みと前処理
@@ -72,6 +83,10 @@ print('Resized train shape:', x_train_resized.shape)
 
 # 縮小後の画像を以後の学習データとして使う
 x_train = x_train_resized
+# %%
+
+# %%
+import torch
 
 # =====================
 # 学習用データジェネレータ
@@ -102,6 +117,9 @@ def vxm_data_generator(x_data, batch_size):
         outputs = [fixed_images, zero_phi]
 
         yield (inputs, outputs)
+# %%
+
+# %%
 
 # 実際に 1バッチ取り出して，入力と出力の形が想定通りか確認する
 train_generator = vxm_data_generator(x_train, batch_size=2)
@@ -111,6 +129,12 @@ print("入力サンプルの形状:")
 print("Moving画像の形状:", in_sample[0].shape)
 print("Fixed画像の形状:", in_sample[1].shape)
 
+print("\nOutput Sample Shapes:")
+print("Moved Images (Fixed) Shape:", out_sample[0].shape)
+print("Zero Gradient Shape:", out_sample[1].shape)
+# %%
+
+# %%
 print("\n出力サンプルの形状:")
 print("変形後画像（学習ターゲット）の形状:", out_sample[0].shape)
 print("ゼロ変形場の形状:", out_sample[1].shape)
@@ -161,6 +185,11 @@ def lncc_loss(I, J, window=9, eps=1e-5):
     J_var = J2_sum - 2 * u_J * J_sum + u_J * u_J * win_size
 
     lncc = cross * cross / (I_var * J_var + eps)
+    return -torch.mean(lncc)  # maximize LNCC → minimize -LNCC
+# %%
+
+# %%
+# configure unet input shape (concatenation of moving and fixed images)
     return -torch.mean(lncc)  # LNCC を大きくしたいので，損失としてはマイナスを付けて最小化する
 
 # =====================
@@ -176,6 +205,21 @@ nb_features = [
     [32, 64, 64, 64, 64],
     [64, 64, 64, 64, 64, 32, 16, 16]
 ]
+# %%
+
+# %%
+model3D = vxm.networks.VxmDense1((64, 128, 128), nb_features, int_steps=0)
+model3D.to(device)
+optimizer = optim.Adam(model3D.parameters(), lr=1e-4)
+# %%
+
+# %%
+A = 100
+B = 0.01
+# %%
+
+# %%
+# NotdecoderHight
 
 # VoxelMorph 系の 3D モデルを作成する
 # 入力サイズは (64, 128, 128)
@@ -345,4 +389,6 @@ for epoch in tqdm(range(epochs)):
         plt.show()
     
     # エポックごとのロスの表示
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {loss:.4f}, loss_vec_ab: {loss_vec_ab:.4f}, loss_image_ab: {loss_image_ab:.4f}, loss_vec_ba: {loss_vec_ba:.4f}, loss_image_ba: {loss_image_ba:.4f}, loss_inv: {loss_inv:.4f}, Shift Range: ±{shift_range} pixels")
+# %%
     print(f"Epoch {epoch+1}/{epochs}, 総損失: {loss:.4f}, 順方向の変形場損失: {loss_vec_ab:.4f}, 順方向の画像損失: {loss_image_ab:.4f}, 逆方向の変形場損失: {loss_vec_ba:.4f}, 逆方向の画像損失: {loss_image_ba:.4f}, 逆写像一貫性損失: {loss_inv:.4f}, 変形幅: ±{shift_range} ボクセル")
