@@ -1,3 +1,4 @@
+# %%
 import os
 import os, sys
 import numpy as np
@@ -11,9 +12,18 @@ import neurite as ne
 import scipy.ndimage
 
 os.environ['VXM_BACKEND'] = 'pytorch'
+# %%
+
+# %%
 os.environ.get('VXM_BACKEND')
+# %%
+
+# %%
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(device)
+# %%
+
+# %%
 # 画像を読み込み
 x_train = np.load('CT_Train_NoBed.npz')['Train']
 x_train = np.transpose(x_train, (3, 0, 1, 2))
@@ -30,6 +40,9 @@ for i in range(x_train.shape[0]):
 print('Resized train vol_shape:', x_train_resized.shape[1:])
 print('Resized train shape:', x_train_resized.shape)
 x_train = x_train_resized
+# %%
+
+# %%
 import torch
 
 def vxm_data_generator(x_data, batch_size):
@@ -56,6 +69,9 @@ def vxm_data_generator(x_data, batch_size):
         outputs = [fixed_images, zero_phi]
 
         yield (inputs, outputs)
+# %%
+
+# %%
 train_generator = vxm_data_generator(x_train, batch_size=2)
 in_sample, out_sample = next(train_generator)
 
@@ -67,6 +83,9 @@ print("Fixed Images Shape:", in_sample[1].shape)
 print("\nOutput Sample Shapes:")
 print("Moved Images (Fixed) Shape:", out_sample[0].shape)
 print("Zero Gradient Shape:", out_sample[1].shape)
+# %%
+
+# %%
 mse_loss = vxm.losses.MSE().loss
 grad_loss = vxm.losses.Grad('l2').loss
 
@@ -105,6 +124,9 @@ def lncc_loss(I, J, window=9, eps=1e-5):
 
     lncc = cross * cross / (I_var * J_var + eps)
     return -torch.mean(lncc)  # maximize LNCC → minimize -LNCC
+# %%
+
+# %%
 # configure unet input shape (concatenation of moving and fixed images)
 ndim = 3
 unet_input_features = 2
@@ -114,9 +136,20 @@ nb_features = [
     [32, 64, 64, 64, 64],
     [64, 64, 64, 64, 64, 32, 16, 16]
 ]
+# %%
+
+# %%
 model3D = vxm.networks.VxmDense1((64, 128, 128), nb_features, int_steps=0)
 model3D.to(device)
 optimizer = optim.Adam(model3D.parameters(), lr=1e-4)
+# %%
+
+# %%
+A = 100
+B = 0.01
+# %%
+
+# %%
 # NotdecoderHight
 from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
@@ -259,3 +292,4 @@ for epoch in tqdm(range(epochs)):
     
     # エポックごとのロスの表示
     print(f"Epoch {epoch+1}/{epochs}, Loss: {loss:.4f}, loss_vec_ab: {loss_vec_ab:.4f}, loss_image_ab: {loss_image_ab:.4f}, loss_vec_ba: {loss_vec_ba:.4f}, loss_image_ba: {loss_image_ba:.4f}, loss_inv: {loss_inv:.4f}, Shift Range: ±{shift_range} pixels")
+# %%
