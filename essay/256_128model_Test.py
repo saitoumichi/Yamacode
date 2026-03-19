@@ -23,7 +23,7 @@ nb_features = [
     [32, 64, 64, 64, 64],
     [64, 64, 64, 64, 64, 32, 16, 16]
 ]
-model = vxm.networks.VxmDense_128_256_128((128, 256, 256), nb_features, int_steps=0)
+model = vxm.networks.VxmDense_128_256_256((128, 256, 256), nb_features, int_steps=0)
 model.to(device)
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 # model.load_state_dict(torch.load('model_VXM_3D_MInoBed_IFMIA.pth', map_location=device))

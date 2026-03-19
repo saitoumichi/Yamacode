@@ -28,7 +28,7 @@ from torch.distributions.normal import Normal
 import pywt
 import torchvision.transforms.functional as TF
 
-from .. import default_unet_features
+from . import default_unet_features
 from . import layers
 from .modelio import LoadableModel, store_config_args
 
