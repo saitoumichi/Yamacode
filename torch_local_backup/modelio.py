@@ -15,7 +15,7 @@
 # 「どんな引数でそのモデルを作ったか」も分かると便利なので，
 # この仕組みを使って同じ構成のモデルを再生成できるようにしている。
 # ============================================================
-import torch
+import torch_local_backup
 import torch.nn as nn
 import inspect
 import functools
@@ -95,7 +95,7 @@ class LoadableModel(nn.Module):
         for key in grid_buffers:
             sd.pop(key)
         # モデル構成と重みを 1つのファイルにまとめて保存する
-        torch.save({'config': self.config, 'model_state': sd}, path)
+        torch_local_backup.save({'config': self.config, 'model_state': sd}, path)
 
     @classmethod
     def load(cls, path, device):
@@ -103,7 +103,7 @@ class LoadableModel(nn.Module):
         保存済みファイルから，モデル構成と重みを読み込む。
         """
         # 保存済みチェックポイントを指定 device 上に読み込む
-        checkpoint = torch.load(path, map_location=torch.device(device))
+        checkpoint = torch_local_backup.load(path, map_location=torch_local_backup.device(device))
         # 保存しておいた config を使って，同じ構成のモデルを再生成する
         model = cls(**checkpoint['config'])
         # 保存済み重みをモデルに読み込む

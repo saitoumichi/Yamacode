@@ -3,10 +3,13 @@
 # 学習済み重みや実データはまだ使わず，まずは最小構成で動作確認する。
 #%%
 import sys
+# print(sys.executable)
 import torch
+print(torch.__version__)
+print(torch.cuda.is_available())
 
 # 手元の研究コードを import できるようにパスを追加する
-sys.path.append('/Users/michico/Documents/大和先輩修論/Yamacode')
+sys.path.append(r'C:\Users\ri0151fv\Yamacode')
 #%%
 
 # hand-made にコピーした VoxelMorph 系コードを読み込む
@@ -75,4 +78,29 @@ if first_conv is not None:
     def debug_first_conv_input(module, inputs):
         x = inputs[0]
         print('first conv name        :', first_conv_name)
-     
+        print('first conv input shape :', x.shape)
+        print('first conv input device:', x.device, 'dtype:', x.dtype)
+
+    hook_handle = first_conv.register_forward_pre_hook(debug_first_conv_input)
+else:
+    print('No Conv3d layer found in the model.')
+#%% 
+
+#%%
+with torch.no_grad():
+    out = model(moving, fixed)
+
+print("forward ok")
+
+if isinstance(out, (list, tuple)):
+    print("output type: tuple/list")
+    print("num outputs:", len(out))
+    for i, x in enumerate(out):
+        if torch.is_tensor(x):
+            print(f"out[{i}] shape:", x.shape, "device:", x.device, "dtype:", x.dtype)
+        else:
+            print(f"out[{i}] type:", type(x))
+else:
+    print("output type:", type(out))
+    if torch.is_tensor(out):
+        print("output shape:", out.shape, "device:", out.device, "dtype:", out.dtype)
