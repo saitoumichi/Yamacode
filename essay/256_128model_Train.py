@@ -28,6 +28,10 @@
 import os
 import os, sys
 # 数値計算・深層学習関連
+
+os.environ['VXM_BACKEND'] = 'pytorch'
+os.environ.get('VXM_BACKEND')
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -48,6 +52,12 @@ os.environ.get('VXM_BACKEND')
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 実際にどの計算環境が選ばれたかを表示する
+import scipy.ndimage
+from voxelmorph.torch import losses as vxm_losses
+from voxelmorph.torch import networks as vxm_networks
+from voxelmorph.torch import layers as vxm_layers
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print('sys.path[0]:', os.getcwd())
 print(device)
 
 # =====================
@@ -115,6 +125,11 @@ mse_loss = vxm.losses.MSE().loss
 
 # Grad 損失は，変形場が急激に変わりすぎないようにするための正則化
 grad_loss = vxm.losses.Grad('l2').loss
+print("\nOutput Sample Shapes:")
+print("Moved Images (Fixed) Shape:", out_sample[0].shape)
+print("Zero Gradient Shape:", out_sample[1].shape)
+mse_loss = vxm_losses.MSE().loss
+grad_loss = vxm_losses.Grad('l2').loss
 
 # MSE と Grad を合わせた総損失
 def total_loss(y_true, y_pred):
@@ -182,6 +197,13 @@ optimizer = optim.Adam(model3D.parameters(), lr=1e-4)
 # wavelet 後サイズ用と元画像サイズ用の 2種類を用意している
 transformer = vxm.layers.SpatialTransformer((64, 128, 128)).to(device)
 transformer256 = vxm.layers.SpatialTransformer((128, 256, 256)).to(device)
+model3D = vxm_networks.VxmDense_128_256_128((128, 256, 256), nb_features, int_steps=0)
+model3D.to(device)
+optimizer = optim.Adam(model3D.parameters(), lr=1e-4)
+
+transformer = vxm_layers.SpatialTransformer((64, 128, 128)).to(device)
+transformer256 = vxm_layers.SpatialTransformer((128, 256, 256)).to(device)
+import torch
 
 # =====================
 # 3次元 Haar wavelet 変換
@@ -413,6 +435,7 @@ model3D = vxm.networks.VxmDense_128_256_128((128, 256, 256), nb_features, int_st
 
 # 事前学習済みの重みを読み込む
 # 保存ファイル名が空白だけになっていないかは，必要に応じて見直す
+model3D = vxm_networks.VxmDense_128_256_128((128, 256, 256), nb_features, int_steps=0)
 model3D.load_state_dict(torch.load('             ', map_location=device))
 model3D.to(device)
 optimizer = optim.Adam(model3D.parameters(), lr=1e-4)

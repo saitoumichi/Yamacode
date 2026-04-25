@@ -81,21 +81,17 @@ class Unet(nn.Module):
         # チャネル数が指定されていなければデフォルト設定を使う
         if nb_features is None:
             nb_features = default_unet_features()
-            print("1")
 
         # nb_features が整数なら，各レベルのチャネル数を自動生成する
         if isinstance(nb_features, int):
             if nb_levels is None:
-                print("2")
                 raise ValueError('must provide unet nb_levels if nb_features is an integer')
             feats = np.round(nb_features * feat_mult ** np.arange(nb_levels)).astype(int)
-            print("3")
             nb_features = [
                 np.repeat(feats[:-1], nb_conv_per_level),
                 np.repeat(np.flip(feats), nb_conv_per_level)
             ]
         elif nb_levels is not None:
-            print("4")
             raise ValueError('cannot use nb_levels if nb_features is not an integer')
 
         # decoder のうち，最後にフル解像度で使う追加畳み込みを切り分ける
@@ -106,7 +102,6 @@ class Unet(nn.Module):
         self.nb_levels = int(nb_dec_convs / nb_conv_per_level) + 1
 
         if isinstance(max_pool, int):
-            print("5")
             max_pool = [max_pool] * self.nb_levels
 
         # プーリングとアップサンプリングの層を準備する
@@ -119,10 +114,8 @@ class Unet(nn.Module):
         encoder_nfs = [prev_nf]
         self.encoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("6")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("7")
                 nf = enc_nf[level * nb_conv_per_level + conv]
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
@@ -133,22 +126,18 @@ class Unet(nn.Module):
         encoder_nfs = np.flip(encoder_nfs)
         self.decoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("8")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("9")
                 nf = dec_nf[level * nb_conv_per_level + conv]
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
             self.decoder.append(convs)
             if not half_res or level < (self.nb_levels - 2):
-                print("10")
                 prev_nf += encoder_nfs[level]
 
         # 最後にフル解像度で使う追加畳み込みを構築する
         self.remaining = nn.ModuleList()
         for num, nf in enumerate(final_convs):
-            print("11")
             self.remaining.append(ConvBlock(ndims, prev_nf, nf))
             prev_nf = nf
 
@@ -274,7 +263,6 @@ class VxmDense(LoadableModel):
 
         # 必要なら flow を積分して，より滑らかな変形場にする層を準備する
         down_shape = [int(dim / int_downsize) for dim in inshape]
-        print(down_shape)
         self.integrate = layers.VecInt(down_shape, int_steps) if int_steps > 0 else None
         # print("insahpeのサイズ",inshape)
 
@@ -300,7 +288,6 @@ class VxmDense(LoadableModel):
         # 積分前に必要なら flow を縮小する
         pos_flow = flow_field
         if self.resize:
-            print("A1")
             pos_flow = self.resize(pos_flow)
         preint_flow = pos_flow
 
@@ -311,21 +298,17 @@ class VxmDense(LoadableModel):
         # integrate to produce diffeomorphic warp
         # 必要なら flow を積分して，より滑らかな変形場にする
         if self.integrate:
-            print("A2")
             pos_flow = self.integrate(pos_flow)
             neg_flow = self.integrate(neg_flow) if self.bidir else None
 
             # resize to final resolution
             # 積分後に元解像度へ戻す
             if self.fullsize:
-                print("A3")
                 pos_flow = self.fullsize(pos_flow)
                 neg_flow = self.fullsize(neg_flow) if self.bidir else None
 
         # warp image with flow field
         # 予測した flow を使って source を変形する
-        print(pos_flow.shape)
-        print(source.shape)
         y_source = self.transformer(source, pos_flow)
         y_target = self.transformer(target, neg_flow) if self.bidir else None
 
@@ -336,12 +319,10 @@ class VxmDense(LoadableModel):
         else:
             return y_source, pos_flow
 
-# ============================================================
-# 共通部品: ConvBlock
-# ------------------------------------------------------------
-# Conv + LeakyReLU を 1セットにした基本ブロック。
-# このクラスは全モデルで共通利用するため，ここで1回だけ定義する。
-# ============================================================
+# =====================
+# 畳み込みブロック
+# =====================
+# Conv + LeakyReLU を 1セットにした基本ブロック
 class ConvBlock(nn.Module):
     """
     U-Net で使う基本畳み込みブロック。
@@ -350,8 +331,11 @@ class ConvBlock(nn.Module):
 
     def __init__(self, ndims, in_channels, out_channels, stride=1):
         super().__init__()
+        # 次元数に応じて Conv1d / Conv2d / Conv3d を選ぶ
         Conv = getattr(nn, 'Conv%dd' % ndims)
+        # カーネルサイズ3，padding=1 の畳み込みを定義する
         self.main = Conv(in_channels, out_channels, 3, stride, 1)
+        # 活性化関数として LeakyReLU を使う
         self.activation = nn.LeakyReLU(0.2)
 
     def forward(self, x):
@@ -450,21 +434,17 @@ class Unet_128_256(nn.Module):
         # default encoder and decoder layer features if nothing provided
         if nb_features is None:
             nb_features = default_unet_features()
-            print("1")
 
         # build feature list automatically
         if isinstance(nb_features, int):
             if nb_levels is None:
-                print("2")
                 raise ValueError('must provide unet nb_levels if nb_features is an integer')
             feats = np.round(nb_features * feat_mult ** np.arange(nb_levels)).astype(int)
-            print("3")
             nb_features = [
                 np.repeat(feats[:-1], nb_conv_per_level),
                 np.repeat(np.flip(feats), nb_conv_per_level)
             ]
         elif nb_levels is not None:
-            print("4")
             raise ValueError('cannot use nb_levels if nb_features is not an integer')
 
         # extract any surplus (full resolution) decoder convolutions
@@ -475,7 +455,6 @@ class Unet_128_256(nn.Module):
         self.nb_levels = int(nb_dec_convs / nb_conv_per_level) + 1
 
         if isinstance(max_pool, int):
-            print("5")
             max_pool = [max_pool] * self.nb_levels
 
         # cache downsampling / upsampling operations
@@ -488,44 +467,34 @@ class Unet_128_256(nn.Module):
         encoder_nfs = [prev_nf]
         self.encoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("6")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("7")
                 nf = enc_nf[level * nb_conv_per_level + conv]
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
             self.encoder.append(convs)
             encoder_nfs.append(prev_nf)
 
-        print(prev_nf)
-
         prev_nf = 256
-        print(prev_nf)
 
         # configure decoder (up-sampling path)
         encoder_nfs = np.flip(encoder_nfs)
         self.decoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("8")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("9")
                 nf = dec_nf[level * nb_conv_per_level + conv]
-                print(nf)
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
                 prev_nf = prev_nf + 192
             self.decoder.append(convs)
             if not half_res or level < (self.nb_levels - 2):
-                print("10")
                 prev_nf += encoder_nfs[level]
 
         prev_nf = 192
         # now we take care of any remaining convolutions
         self.remaining = nn.ModuleList()
         for num, nf in enumerate(final_convs):
-            print("11")
             self.remaining.append(ConvBlock(ndims, prev_nf, nf))
             prev_nf = nf
 
@@ -707,7 +676,6 @@ class VxmDense_128_256(LoadableModel):
 
         # configure optional integration layer for diffeomorphic warp
         down_shape = [int(dim / int_downsize) for dim in inshape]
-        print(down_shape)
         self.integrate = layers.VecInt(down_shape, int_steps) if int_steps > 0 else None
         # print("insahpeのサイズ",inshape)
 
@@ -1182,12 +1150,10 @@ class Unet_128_256_128(nn.Module):
 
 
 # =====================
-# Multi-band flow-only VoxelMorph
+# 改良版 128-256-128 VoxelMorph
 # =====================
-# Unet_128_256_128 で複数周波数帯から特徴を抽出し，
-# flow（DVF）のみを出力するモデル。
-# 旧名: VxmDense_128_256_256
-class VxmDenseMultiBandFlowOnly(LoadableModel):
+# 改良版 U-Net から flow を予測するモデル
+class VxmDense_128_256_256(LoadableModel):
     """
     改良版の wavelet VoxelMorph モデル。
     """
@@ -1257,7 +1223,6 @@ class VxmDenseMultiBandFlowOnly(LoadableModel):
 
         # configure optional integration layer for diffeomorphic warp
         down_shape = [int(dim / int_downsize) for dim in inshape]
-        print(down_shape)
         self.integrate = layers.VecInt(down_shape, int_steps) if int_steps > 0 else None
 
         self.transformer = layers.SpatialTransformer((64, 128, 128))
@@ -1272,8 +1237,76 @@ class VxmDenseMultiBandFlowOnly(LoadableModel):
         return pos_flow
 
 
-# 互換性維持用: 古い名前でも呼べるようにする
-VxmDense_128_256_256 = VxmDenseMultiBandFlowOnly
+
+
+    # def forward(self, source, target, registration=False):
+    #     '''
+    #     Parameters:
+    #         source: Source image tensor.
+    #         target: Target image tensor.
+    #         registration: Return transformed image and flow. Default is False.
+    #     '''
+    #     x = self.unet_model(source, target)
+
+    #     flow_field = self.flow(x)
+
+    #     pos_flow = flow_field
+        
+    #     source_np = source[0, 0].detach().cpu().numpy() 
+    #     source_np = pywt.dwtn(source_np, 'haar')
+
+    #     LLL = source_np['aaa'] 
+    #     LLL = LLL[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     LLL = np.repeat(LLL, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     LLL = self.transformer(LLL, pos_flow)
+    #     LLL = LLL[0, 0].detach().cpu().numpy() 
+
+    #     HLL = source_np['daa']
+    #     HLL = HLL[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     HLL = np.repeat(HLL, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     HLL = self.transformer(HLL, pos_flow)
+    #     HLL = HLL[0, 0].detach().cpu().numpy() 
+
+    #     LHL = source_np['ada']
+    #     LHL = LHL[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     LHL = np.repeat(LHL, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     LHL = self.transformer(LHL, pos_flow)
+    #     LHL = LHL[0, 0].detach().cpu().numpy() 
+
+    #     LLH = source_np['aad']
+    #     LLH = LLH[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     LLH = np.repeat(LLH, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     LLH = self.transformer(LLH, pos_flow)
+    #     LLH = LLH[0, 0].detach().cpu().numpy() 
+
+    #     HHL = source_np['dda']
+    #     HHL = HHL[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     HHL = np.repeat(HHL, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     HHL = self.transformer(HHL, pos_flow)
+    #     HHL = HHL[0, 0].detach().cpu().numpy() 
+
+    #     HLH = source_np['dad']
+    #     HLH = HLH[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     HLH = np.repeat(HLH, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     HLH = self.transformer(HLH, pos_flow)
+    #     HLH = HLH[0, 0].detach().cpu().numpy() 
+
+    #     LHH = source_np['add']
+    #     LHH = LHH[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     LHH = np.repeat(LHH, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     LHH = self.transformer(LHH, pos_flow)
+    #     LHH = LHH[0, 0].detach().cpu().numpy() 
+
+    #     HHH = source_np['ddd']
+    #     HHH = HHH[np.newaxis, np.newaxis, ...]   # (1,1,128,256,256)
+    #     HHH = np.repeat(HHH, 2, axis=0).to(device)  # (2,1,128,256,256)
+    #     HHH = self.transformer(HHH, pos_flow)
+    #     HHH = HHH[0, 0].detach().cpu().numpy() 
+
+
+    #     y_source = self.transformer(source, pos_flow)
+
+    #     return y_source, pos_flow
 
 
 
@@ -1339,21 +1372,17 @@ class Unet1(nn.Module):
         # default encoder and decoder layer features if nothing provided
         if nb_features is None:
             nb_features = default_unet_features()
-            print("1")
 
         # build feature list automatically
         if isinstance(nb_features, int):
             if nb_levels is None:
-                print("2")
                 raise ValueError('must provide unet nb_levels if nb_features is an integer')
             feats = np.round(nb_features * feat_mult ** np.arange(nb_levels)).astype(int)
-            print("3")
             nb_features = [
                 np.repeat(feats[:-1], nb_conv_per_level),
                 np.repeat(np.flip(feats), nb_conv_per_level)
             ]
         elif nb_levels is not None:
-            print("4")
             raise ValueError('cannot use nb_levels if nb_features is not an integer')
 
         # extract any surplus (full resolution) decoder convolutions
@@ -1364,7 +1393,6 @@ class Unet1(nn.Module):
         self.nb_levels = int(nb_dec_convs / nb_conv_per_level) + 1
 
         if isinstance(max_pool, int):
-            print("5")
             max_pool = [max_pool] * self.nb_levels
 
         # cache downsampling / upsampling operations
@@ -1377,44 +1405,34 @@ class Unet1(nn.Module):
         encoder_nfs = [prev_nf]
         self.encoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("6")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("7")
                 nf = enc_nf[level * nb_conv_per_level + conv]
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
             self.encoder.append(convs)
             encoder_nfs.append(prev_nf)
 
-        print(prev_nf)
-
         prev_nf = 128
-        print(prev_nf)
 
         # configure decoder (up-sampling path)
         encoder_nfs = np.flip(encoder_nfs)
         self.decoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("8")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("9")
                 nf = dec_nf[level * nb_conv_per_level + conv]
-                print(nf)
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
                 prev_nf = prev_nf + 64
             self.decoder.append(convs)
             if not half_res or level < (self.nb_levels - 2):
-                print("10")
                 prev_nf += encoder_nfs[level]
 
         prev_nf = 128
         # now we take care of any remaining convolutions
         self.remaining = nn.ModuleList()
         for num, nf in enumerate(final_convs):
-            print("11")
             self.remaining.append(ConvBlock(ndims, prev_nf, nf))
             prev_nf = nf
 
@@ -1441,10 +1459,7 @@ class Unet1(nn.Module):
         LL_target = torch.tensor(LL_target, dtype=torch.float32, device=target.device)
         HH_target = torch.tensor(HH_target, dtype=torch.float32, device=target.device)
 
-        print("LL_Moving", LL_source.mean())
-        print("HH_Moving", HH_source.mean())
-        print("LL_Fixed", LL_target.mean())
-        print("HH_Fixed", HH_target.mean())      
+        # Debug prints removed
 
         xLL = torch.cat([LL_source, LL_target], dim=1)
         xHH = torch.cat([HH_source, HH_target], dim=1)
@@ -1584,21 +1599,17 @@ class Unet_FilterBank(nn.Module):
         # default encoder and decoder layer features if nothing provided
         if nb_features is None:
             nb_features = default_unet_features()
-            print("1")
 
         # build feature list automatically
         if isinstance(nb_features, int):
             if nb_levels is None:
-                print("2")
                 raise ValueError('must provide unet nb_levels if nb_features is an integer')
             feats = np.round(nb_features * feat_mult ** np.arange(nb_levels)).astype(int)
-            print("3")
             nb_features = [
                 np.repeat(feats[:-1], nb_conv_per_level),
                 np.repeat(np.flip(feats), nb_conv_per_level)
             ]
         elif nb_levels is not None:
-            print("4")
             raise ValueError('cannot use nb_levels if nb_features is not an integer')
 
         # extract any surplus (full resolution) decoder convolutions
@@ -1609,7 +1620,6 @@ class Unet_FilterBank(nn.Module):
         self.nb_levels = int(nb_dec_convs / nb_conv_per_level) + 1
 
         if isinstance(max_pool, int):
-            print("5")
             max_pool = [max_pool] * self.nb_levels
 
         # cache downsampling / upsampling operations
@@ -1676,44 +1686,34 @@ class Unet_FilterBank(nn.Module):
         encoder_nfs = [prev_nf]
         self.encoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("6")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("7")
                 nf = enc_nf[level * nb_conv_per_level + conv]
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
             self.encoder.append(convs)
             encoder_nfs.append(prev_nf)
 
-        print(prev_nf)
-
         prev_nf = 128
-        print(prev_nf)
 
         # configure decoder (up-sampling path)
         encoder_nfs = np.flip(encoder_nfs)
         self.decoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("8")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("9")
                 nf = dec_nf[level * nb_conv_per_level + conv]
-                print(nf)
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
                 prev_nf = prev_nf + 64
             self.decoder.append(convs)
             if not half_res or level < (self.nb_levels - 2):
-                print("10")
                 prev_nf += encoder_nfs[level]
 
         prev_nf = 128
         # now we take care of any remaining convolutions
         self.remaining = nn.ModuleList()
         for num, nf in enumerate(final_convs):
-            print("11")
             self.remaining.append(ConvBlock(ndims, prev_nf, nf))
             prev_nf = nf
 
@@ -1821,21 +1821,17 @@ class Unet11(nn.Module):
         # default encoder and decoder layer features if nothing provided
         if nb_features is None:
             nb_features = default_unet_features()
-            print("1")
 
         # build feature list automatically
         if isinstance(nb_features, int):
             if nb_levels is None:
-                print("2")
                 raise ValueError('must provide unet nb_levels if nb_features is an integer')
             feats = np.round(nb_features * feat_mult ** np.arange(nb_levels)).astype(int)
-            print("3")
             nb_features = [
                 np.repeat(feats[:-1], nb_conv_per_level),
                 np.repeat(np.flip(feats), nb_conv_per_level)
             ]
         elif nb_levels is not None:
-            print("4")
             raise ValueError('cannot use nb_levels if nb_features is not an integer')
 
         # extract any surplus (full resolution) decoder convolutions
@@ -1846,7 +1842,6 @@ class Unet11(nn.Module):
         self.nb_levels = int(nb_dec_convs / nb_conv_per_level) + 1
 
         if isinstance(max_pool, int):
-            print("5")
             max_pool = [max_pool] * self.nb_levels
 
         # cache downsampling / upsampling operations
@@ -1859,44 +1854,34 @@ class Unet11(nn.Module):
         encoder_nfs = [prev_nf]
         self.encoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("6")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("7")
                 nf = enc_nf[level * nb_conv_per_level + conv]
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
             self.encoder.append(convs)
             encoder_nfs.append(prev_nf)
 
-        print(prev_nf)
-
         prev_nf = 512
-        print(prev_nf)
 
         # configure decoder (up-sampling path)
         encoder_nfs = np.flip(encoder_nfs)
         self.decoder = nn.ModuleList()
         for level in range(self.nb_levels - 1):
-            print("8")
             convs = nn.ModuleList()
             for conv in range(nb_conv_per_level):
-                print("9")
                 nf = dec_nf[level * nb_conv_per_level + conv]
-                print(nf)
                 convs.append(ConvBlock(ndims, prev_nf, nf))
                 prev_nf = nf
                 prev_nf = prev_nf + 448
             self.decoder.append(convs)
             if not half_res or level < (self.nb_levels - 2):
-                print("10")
                 prev_nf += encoder_nfs[level]
 
         prev_nf = 320
         # now we take care of any remaining convolutions
         self.remaining = nn.ModuleList()
         for num, nf in enumerate(final_convs):
-            print("11")
             self.remaining.append(ConvBlock(ndims, prev_nf, nf))
             prev_nf = nf
 

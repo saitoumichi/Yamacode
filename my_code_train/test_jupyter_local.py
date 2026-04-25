@@ -75,4 +75,48 @@ if first_conv is not None:
     def debug_first_conv_input(module, inputs):
         x = inputs[0]
         print('first conv name        :', first_conv_name)
-     
+        print('first conv input shape :', tuple(x.shape))
+        print('first conv weight shape:', tuple(module.weight.shape))
+
+    hook_handle = first_conv.register_forward_pre_hook(debug_first_conv_input)
+#%%
+
+with torch.no_grad():
+    print('before forward')
+    try:
+        pos_flow = model(moving, fixed)
+        print('after forward')
+    except Exception:
+        import traceback
+        print('forward failed')
+        print('moving shape:', moving.shape)
+        print('fixed shape :', fixed.shape)
+        traceback.print_exc()
+        raise
+    finally:
+        if hook_handle is not None:
+            hook_handle.remove()
+
+print('flow shape  :', pos_flow.shape)
+#%%
+
+# flow を使って画像をワープする Spatial Transformer を作る
+# これは論文の式(2), 式(3) に対応する処理を担う
+# ただしモデル本体の forward が flow のみを返す実装なので，
+# moved image はここで明示的に作る
+transformer256 = layers.SpatialTransformer((128, 256, 256)).to(device)
+
+with torch.no_grad():
+    moved = transformer256(moving, pos_flow)
+
+print('moved shape :', moved.shape)
+#%%
+
+# ここまで通れば，
+# 1. import
+# 2. モデル生成
+# 3. ダミー入力での forward
+# 4. SpatialTransformer によるワープ
+# の最小確認ができたことになる
+print('local test finished')
+#%%
