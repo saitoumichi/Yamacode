@@ -18,7 +18,7 @@
 # 変形が不自然になりすぎないようにする損失も重要になる。
 # このファイルは，そのための基本的な損失をまとめたもの。
 # ============================================================
-import torch
+import torch_local_backup
 import torch.nn.functional as F
 import numpy as np
 import math
@@ -55,7 +55,7 @@ class NCC:
 
         # 局所和を求めるための，全部1のフィルタを作る
         # 現状の実装ではフィルタを CUDA 上に置いている
-        sum_filt = torch.ones([1, 1, *win]).to("cuda")
+        sum_filt = torch_local_backup.ones([1, 1, *win]).to("cuda")
 
         # 畳み込み後にサイズを保ちやすいよう，パディング量を計算する
         pad_no = math.floor(win[0] / 2)
@@ -99,7 +99,7 @@ class NCC:
         cc = cross * cross / (I_var * J_var + 1e-5)
 
         # 相関は大きいほど良いので，損失としてはマイナスを付けて最小化する
-        return -torch.mean(cc)
+        return -torch_local_backup.mean(cc)
 
 
 # =====================
@@ -114,7 +114,7 @@ class MSE:
 
     def loss(self, y_true, y_pred):
         # 予測値と正解値の差を二乗して平均する
-        return torch.mean((y_true - y_pred) ** 2)
+        return torch_local_backup.mean((y_true - y_pred) ** 2)
 
 
 # =====================
@@ -135,9 +135,9 @@ class Dice:
         # 分子は重なった領域の 2倍
         top = 2 * (y_true * y_pred).sum(dim=vol_axes)
         # 分母は両者の体積和で，0除算を避けるために下限を設ける
-        bottom = torch.clamp((y_true + y_pred).sum(dim=vol_axes), min=1e-5)
+        bottom = torch_local_backup.clamp((y_true + y_pred).sum(dim=vol_axes), min=1e-5)
         # バッチ全体で平均 Dice を求める
-        dice = torch.mean(top / bottom)
+        dice = torch_local_backup.mean(top / bottom)
         # Dice は大きいほど良いので，損失としてはマイナスを付ける
         return -dice
 
@@ -160,9 +160,9 @@ class Grad:
 
     def loss(self, _, y_pred):
         # 各軸方向で隣接ボクセルとの差分を取り，変形の変化量を調べる
-        dy = torch.abs(y_pred[:, :, 1:, :, :] - y_pred[:, :, :-1, :, :])
-        dx = torch.abs(y_pred[:, :, :, 1:, :] - y_pred[:, :, :, :-1, :])
-        dz = torch.abs(y_pred[:, :, :, :, 1:] - y_pred[:, :, :, :, :-1])
+        dy = torch_local_backup.abs(y_pred[:, :, 1:, :, :] - y_pred[:, :, :-1, :, :])
+        dx = torch_local_backup.abs(y_pred[:, :, :, 1:, :] - y_pred[:, :, :, :-1, :])
+        dz = torch_local_backup.abs(y_pred[:, :, :, :, 1:] - y_pred[:, :, :, :, :-1])
 
         # l2 の場合は差分を二乗して，より大きな変化を強く罰する
         if self.penalty == 'l2':
@@ -171,7 +171,7 @@ class Grad:
             dz = dz * dz
 
         # 各方向の平均勾配を足し合わせる
-        d = torch.mean(dx) + torch.mean(dy) + torch.mean(dz)
+        d = torch_local_backup.mean(dx) + torch_local_backup.mean(dy) + torch_local_backup.mean(dz)
         # 3方向の平均を取って最終的な勾配損失にする
         grad = d / 3.0
 

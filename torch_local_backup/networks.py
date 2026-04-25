@@ -21,7 +21,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-import torch
+import torch_local_backup
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
@@ -33,7 +33,7 @@ from . import layers
 from .modelio import LoadableModel, store_config_args
 
 # GPU が使えれば GPU を，使えなければ CPU を使う
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch_local_backup.device('cuda:0' if torch_local_backup.cuda.is_available() else 'cpu')
 
 # ============================================================
 # 通常版 VoxelMorph
@@ -158,7 +158,7 @@ class Unet(nn.Module):
     # def forward(self, x):
     def forward(self, source, target):
         # moving画像とfixed画像をチャネル方向に結合して U-Net へ入れる
-        x = torch.cat([source, target], dim=1)
+        x = torch_local_backup.cat([source, target], dim=1)
 
         # encoder 側: 畳み込みして特徴を抽出し，途中結果をスキップ接続用に保存する
         # 入力そのものも最初のスキップ接続候補として保存する
@@ -177,7 +177,7 @@ class Unet(nn.Module):
             if not self.half_res or level < (self.nb_levels - 2):
                 x = self.upsampling[level](x)
                 # print("Before concatenation（デコーダーの中）:", x.shape, x_history[-1].shape)  # 追加
-                x = torch.cat([x, x_history.pop()], dim=1)
+                x = torch_local_backup.cat([x, x_history.pop()], dim=1)
                 # print("After concatenation（デコーダーの中）:", x.shape)  # 追加
 
         # 最後にフル解像度で追加畳み込みを行う
@@ -250,7 +250,7 @@ class VxmDense(LoadableModel):
 
         # flow 出力層は最初はごく小さい値を出すように初期化する
         self.flow.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow.weight.shape))
-        self.flow.bias = nn.Parameter(torch.zeros(self.flow.bias.shape))
+        self.flow.bias = nn.Parameter(torch_local_backup.zeros(self.flow.bias.shape))
 
         # PyTorch 版では確率的 flow は未対応
         if use_probs:
@@ -373,7 +373,7 @@ def _make_band_tensor(band_np, device, batch_size=2):
     戻り値 : (B, 1, D/2, H/2, W/2) 形状の Tensor
     """
     # NumPy 配列を Tensor に変換して device に載せる
-    band = torch.from_numpy(band_np).float().to(device)
+    band = torch_local_backup.from_numpy(band_np).float().to(device)
     # バッチ次元とチャネル次元を追加する
     band = band.unsqueeze(0).unsqueeze(0)        # (1,1,D/2,H/2,W/2)
     # バッチサイズぶん複製して，モデル入力形式に合わせる
@@ -548,10 +548,10 @@ class Unet_128_256(nn.Module):
         target_bands = _wavelet_decompose(target_np, device, B)
 
         # 各周波数帯ごとに source と target をチャネル方向で結合する
-        LLL  = torch.cat([source_bands["LLL"],  target_bands["LLL"]],  dim=1)
-        L2H1 = torch.cat([source_bands["L2H1"], target_bands["L2H1"]], dim=1)
-        L1H2 = torch.cat([source_bands["L1H2"], target_bands["L1H2"]], dim=1)
-        HHH  = torch.cat([source_bands["HHH"],  target_bands["HHH"]],  dim=1)
+        LLL  = torch_local_backup.cat([source_bands["LLL"],  target_bands["LLL"]],  dim=1)
+        L2H1 = torch_local_backup.cat([source_bands["L2H1"], target_bands["L2H1"]], dim=1)
+        L1H2 = torch_local_backup.cat([source_bands["L1H2"], target_bands["L1H2"]], dim=1)
+        HHH  = torch_local_backup.cat([source_bands["HHH"],  target_bands["HHH"]],  dim=1)
 
         # 各周波数帯を同じ encoder 構造で別々に処理する
         x_historyLLL = [LLL]
@@ -583,7 +583,7 @@ class Unet_128_256(nn.Module):
             HHH = self.pooling[level](HHH)
 
         # 各枝の最深部特徴を結合して 1つの潜在表現にする
-        latent = torch.cat([LLL, L2H1, L1H2, HHH], dim=1)  # チャネル方向で結合
+        latent = torch_local_backup.cat([LLL, L2H1, L1H2, HHH], dim=1)  # チャネル方向で結合
 
         # decoder でアップサンプリングしながら各枝のスキップ接続を結合する
         for level, convs in enumerate(self.decoder):
@@ -601,7 +601,7 @@ class Unet_128_256(nn.Module):
                 skip_l1h2 = x_historyL1H2.pop()
                 skip_hhh = x_historyHHH.pop()
 
-                latent = torch.cat([latent, skip_lll, skip_l2h1, skip_l1h2, skip_hhh], dim=1)  # チャネル方向で結合
+                latent = torch_local_backup.cat([latent, skip_lll, skip_l2h1, skip_l1h2, skip_hhh], dim=1)  # チャネル方向で結合
                 # print(f"After concatenating skip connections: {latent.shape}")  # スキップ接続後の形状を確認
 
         # 最後にフル解像度で追加畳み込みを行う
@@ -683,7 +683,7 @@ class VxmDense_128_256(LoadableModel):
 
         # init flow layer with small weights and bias
         self.flow.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow.weight.shape))
-        self.flow.bias = nn.Parameter(torch.zeros(self.flow.bias.shape))
+        self.flow.bias = nn.Parameter(torch_local_backup.zeros(self.flow.bias.shape))
 
         # probabilities are not supported in pytorch
         if use_probs:
@@ -740,7 +740,7 @@ class VxmDense_128_256(LoadableModel):
         for k in keys:
             c = coeffs[k]                       # (D/2,H/2,W/2)
             # NumPy の係数を Tensor に直して device に載せる
-            c = torch.from_numpy(c).float().to(source.device)
+            c = torch_local_backup.from_numpy(c).float().to(source.device)
             # バッチ次元とチャネル次元を追加する
             c = c.unsqueeze(0).unsqueeze(0)     # (1,1,D,H,W)
             # 現在の実装に合わせてバッチサイズ 2 に複製する
@@ -754,7 +754,7 @@ class VxmDense_128_256(LoadableModel):
         warped_source = pywt.idwtn(warped_coeffs, 'haar')
 
         # 再構成画像を Tensor に戻してモデル出力形式へ整える
-        warped_source = torch.from_numpy(warped_source).float().to(source.device)
+        warped_source = torch_local_backup.from_numpy(warped_source).float().to(source.device)
         warped_source = warped_source.unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
 
         return warped_source, pos_flow
@@ -1141,16 +1141,16 @@ class Unet_128_256_128(nn.Module):
     # モデル全体の forward 処理
     def forward(self, source, target):
         # 8成分を研究用の4つの周波数帯へまとめる
-        LLL = torch.cat([source[:, 0:1], target[:, 0:1]], dim=1)
-        L2H1 = torch.cat([
+        LLL = torch_local_backup.cat([source[:, 0:1], target[:, 0:1]], dim=1)
+        L2H1 = torch_local_backup.cat([
             source[:, 1:2] + source[:, 2:3] + source[:, 4:5],
             target[:, 1:2] + target[:, 2:3] + target[:, 4:5]
         ], dim=1)
-        L1H2 = torch.cat([
+        L1H2 = torch_local_backup.cat([
             source[:, 3:4] + source[:, 5:6] + source[:, 6:7],
             target[:, 3:4] + target[:, 5:6] + target[:, 6:7]
         ], dim=1)
-        HHH = torch.cat([source[:, 7:8], target[:, 7:8]], dim=1)
+        HHH = torch_local_backup.cat([source[:, 7:8], target[:, 7:8]], dim=1)
 
         # 4本の独立 encoder でそれぞれ特徴抽出する
         LLL,  hist_LLL  = self.encoder_forward(LLL,  self.encoder_LLL)
@@ -1159,7 +1159,7 @@ class Unet_128_256_128(nn.Module):
         HHH,  hist_HHH  = self.encoder_forward(HHH,  self.encoder_HHH)
 
         # 最深部特徴を結合して潜在表現にする
-        latent = torch.cat([LLL, L2H1, L1H2, HHH], dim=1)
+        latent = torch_local_backup.cat([LLL, L2H1, L1H2, HHH], dim=1)
 
         # decoder でアップサンプリングしながら各枝の特徴を再結合する
         for level, convs in enumerate(self.decoder):
@@ -1167,7 +1167,7 @@ class Unet_128_256_128(nn.Module):
                 latent = conv(latent)
             if not self.half_res or level < (self.nb_levels - 2):
                 latent = self.upsampling[level](latent)
-                latent = torch.cat([
+                latent = torch_local_backup.cat([
                     latent,
                     hist_LLL.pop(),
                     hist_L2H1.pop(),
@@ -1233,7 +1233,7 @@ class VxmDenseMultiBandFlowOnly(LoadableModel):
 
         # init flow layer with small weights and bias
         self.flow.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow.weight.shape))
-        self.flow.bias = nn.Parameter(torch.zeros(self.flow.bias.shape))
+        self.flow.bias = nn.Parameter(torch_local_backup.zeros(self.flow.bias.shape))
 
         # probabilities are not supported in pytorch
         if use_probs:
@@ -1436,18 +1436,18 @@ class Unet1(nn.Module):
         LL_target, HH_target = split_coeffs(coeffs_target)
 
         # NumPy 配列を Tensor に直して device に戻す
-        LL_source = torch.tensor(LL_source, dtype=torch.float32, device=source.device)
-        HH_source = torch.tensor(HH_source, dtype=torch.float32, device=source.device)
-        LL_target = torch.tensor(LL_target, dtype=torch.float32, device=target.device)
-        HH_target = torch.tensor(HH_target, dtype=torch.float32, device=target.device)
+        LL_source = torch_local_backup.tensor(LL_source, dtype=torch_local_backup.float32, device=source.device)
+        HH_source = torch_local_backup.tensor(HH_source, dtype=torch_local_backup.float32, device=source.device)
+        LL_target = torch_local_backup.tensor(LL_target, dtype=torch_local_backup.float32, device=target.device)
+        HH_target = torch_local_backup.tensor(HH_target, dtype=torch_local_backup.float32, device=target.device)
 
         print("LL_Moving", LL_source.mean())
         print("HH_Moving", HH_source.mean())
         print("LL_Fixed", LL_target.mean())
         print("HH_Fixed", HH_target.mean())      
 
-        xLL = torch.cat([LL_source, LL_target], dim=1)
-        xHH = torch.cat([HH_source, HH_target], dim=1)
+        xLL = torch_local_backup.cat([LL_source, LL_target], dim=1)
+        xHH = torch_local_backup.cat([HH_source, HH_target], dim=1)
 
         # 低周波枝と高周波枝を別々に encoder へ通す
         x_historyLL = [xLL]
@@ -1465,7 +1465,7 @@ class Unet1(nn.Module):
             xHH = self.pooling[level](xHH)
 
         # 2枝の最深部特徴を結合する
-        latent = torch.cat([xLL, xHH], dim=1)  # チャネル方向で結合
+        latent = torch_local_backup.cat([xLL, xHH], dim=1)  # チャネル方向で結合
 
         # decoder でアップサンプリングしながら 2枝のスキップ接続を結合する
         for level, convs in enumerate(self.decoder):
@@ -1476,7 +1476,7 @@ class Unet1(nn.Module):
                 # 低周波枝・高周波枝の対応する特徴を結合する
                 skip_ll = x_historyLL.pop()
                 skip_hh = x_historyHH.pop()
-                latent = torch.cat([latent, skip_ll, skip_hh], dim=1)  # チャネル方向で結合
+                latent = torch_local_backup.cat([latent, skip_ll, skip_hh], dim=1)  # チャネル方向で結合
 
         # 最後にフル解像度で追加畳み込みを行う
         for conv in self.remaining:
@@ -1732,13 +1732,13 @@ class Unet_FilterBank(nn.Module):
         LL_target = apply_3d_filterLL(target.cpu().numpy(), hlfh_kernel)
 
         # NumPy 配列を Tensor に直して device に戻す
-        LL_source = torch.tensor(LL_source, dtype=torch.float32, device=source.device)
-        HH_source = torch.tensor(HH_source, dtype=torch.float32, device=source.device)
-        LL_target = torch.tensor(LL_target, dtype=torch.float32, device=target.device)
-        HH_target = torch.tensor(HH_target, dtype=torch.float32, device=target.device)
+        LL_source = torch_local_backup.tensor(LL_source, dtype=torch_local_backup.float32, device=source.device)
+        HH_source = torch_local_backup.tensor(HH_source, dtype=torch_local_backup.float32, device=source.device)
+        LL_target = torch_local_backup.tensor(LL_target, dtype=torch_local_backup.float32, device=target.device)
+        HH_target = torch_local_backup.tensor(HH_target, dtype=torch_local_backup.float32, device=target.device)
    
-        xLL = torch.cat([LL_source, LL_target], dim=1)
-        xHH = torch.cat([HH_source, HH_target], dim=1)
+        xLL = torch_local_backup.cat([LL_source, LL_target], dim=1)
+        xHH = torch_local_backup.cat([HH_source, HH_target], dim=1)
 
         # 低周波枝と高周波枝を別々に encoder へ通す
         x_historyLL = [xLL]
@@ -1756,7 +1756,7 @@ class Unet_FilterBank(nn.Module):
             xHH = self.pooling[level](xHH)
 
         # 2枝の最深部特徴を結合する
-        latent = torch.cat([xLL, xHH], dim=1)  # チャネル方向で結合
+        latent = torch_local_backup.cat([xLL, xHH], dim=1)  # チャネル方向で結合
 
         # decoder でアップサンプリングしながら 2枝の特徴を再結合する
         for level, convs in enumerate(self.decoder):
@@ -1767,7 +1767,7 @@ class Unet_FilterBank(nn.Module):
                 # 低周波枝・高周波枝の対応する特徴を結合する
                 skip_ll = x_historyLL.pop()
                 skip_hh = x_historyHH.pop()
-                latent = torch.cat([latent, skip_ll, skip_hh], dim=1)  # チャネル方向で結合
+                latent = torch_local_backup.cat([latent, skip_ll, skip_hh], dim=1)  # チャネル方向で結合
 
         # 最後にフル解像度で追加畳み込みを行う
         for conv in self.remaining:
@@ -1931,32 +1931,32 @@ class Unet11(nn.Module):
         target_dda = coeffs_target['dda']
         target_ddd = coeffs_target['ddd']
 
-        LLL_source = torch.tensor(source_aaa, dtype=torch.float32, device=source.device)
-        LLH_source = torch.tensor(source_aad, dtype=torch.float32, device=source.device)
-        LHL_source = torch.tensor(source_ada, dtype=torch.float32, device=source.device)
-        LHH_source = torch.tensor(source_add, dtype=torch.float32, device=source.device) 
-        HLL_source = torch.tensor(source_daa, dtype=torch.float32, device=source.device)
-        HLH_source = torch.tensor(source_dad, dtype=torch.float32, device=source.device)
-        HHL_source = torch.tensor(source_dda, dtype=torch.float32, device=source.device)
-        HHH_source = torch.tensor(source_ddd, dtype=torch.float32, device=source.device)
+        LLL_source = torch_local_backup.tensor(source_aaa, dtype=torch_local_backup.float32, device=source.device)
+        LLH_source = torch_local_backup.tensor(source_aad, dtype=torch_local_backup.float32, device=source.device)
+        LHL_source = torch_local_backup.tensor(source_ada, dtype=torch_local_backup.float32, device=source.device)
+        LHH_source = torch_local_backup.tensor(source_add, dtype=torch_local_backup.float32, device=source.device) 
+        HLL_source = torch_local_backup.tensor(source_daa, dtype=torch_local_backup.float32, device=source.device)
+        HLH_source = torch_local_backup.tensor(source_dad, dtype=torch_local_backup.float32, device=source.device)
+        HHL_source = torch_local_backup.tensor(source_dda, dtype=torch_local_backup.float32, device=source.device)
+        HHH_source = torch_local_backup.tensor(source_ddd, dtype=torch_local_backup.float32, device=source.device)
 
-        LLL_target = torch.tensor(target_aaa, dtype=torch.float32, device=target.device)
-        LLH_target = torch.tensor(target_aad, dtype=torch.float32, device=target.device)
-        LHL_target = torch.tensor(target_ada, dtype=torch.float32, device=target.device)
-        LHH_target = torch.tensor(target_add, dtype=torch.float32, device=target.device) 
-        HLL_target = torch.tensor(target_daa, dtype=torch.float32, device=target.device)
-        HLH_target = torch.tensor(target_dad, dtype=torch.float32, device=target.device)
-        HHL_target = torch.tensor(target_dda, dtype=torch.float32, device=target.device)
-        HHH_target = torch.tensor(target_ddd, dtype=torch.float32, device=target.device)
+        LLL_target = torch_local_backup.tensor(target_aaa, dtype=torch_local_backup.float32, device=target.device)
+        LLH_target = torch_local_backup.tensor(target_aad, dtype=torch_local_backup.float32, device=target.device)
+        LHL_target = torch_local_backup.tensor(target_ada, dtype=torch_local_backup.float32, device=target.device)
+        LHH_target = torch_local_backup.tensor(target_add, dtype=torch_local_backup.float32, device=target.device) 
+        HLL_target = torch_local_backup.tensor(target_daa, dtype=torch_local_backup.float32, device=target.device)
+        HLH_target = torch_local_backup.tensor(target_dad, dtype=torch_local_backup.float32, device=target.device)
+        HHL_target = torch_local_backup.tensor(target_dda, dtype=torch_local_backup.float32, device=target.device)
+        HHH_target = torch_local_backup.tensor(target_ddd, dtype=torch_local_backup.float32, device=target.device)
 
-        xLLL = torch.cat([LLL_source, LLL_target], dim=1)
-        xLLH = torch.cat([LLH_source, LLH_target], dim=1)
-        xLHL = torch.cat([LHL_source, LHL_target], dim=1)
-        xLHH = torch.cat([LHH_source, LHH_target], dim=1)
-        xHLL = torch.cat([HLL_source, HLL_target], dim=1)
-        xHLH = torch.cat([HLH_source, HLH_target], dim=1)
-        xHHL = torch.cat([HHL_source, HHL_target], dim=1)
-        xHHH = torch.cat([HHH_source, HHH_target], dim=1)
+        xLLL = torch_local_backup.cat([LLL_source, LLL_target], dim=1)
+        xLLH = torch_local_backup.cat([LLH_source, LLH_target], dim=1)
+        xLHL = torch_local_backup.cat([LHL_source, LHL_target], dim=1)
+        xLHH = torch_local_backup.cat([LHH_source, LHH_target], dim=1)
+        xHLL = torch_local_backup.cat([HLL_source, HLL_target], dim=1)
+        xHLH = torch_local_backup.cat([HLH_source, HLH_target], dim=1)
+        xHHL = torch_local_backup.cat([HHL_source, HHL_target], dim=1)
+        xHHH = torch_local_backup.cat([HHH_source, HHH_target], dim=1)
 
         # encoder forward pass
         x_historyLLL = [xLLL]
@@ -2023,7 +2023,7 @@ class Unet11(nn.Module):
             xHHH = self.pooling[level](xHHH)
 
         # 潜在変数を統合
-        latent = torch.cat([xLLL, xLLH, xLHL, xLHH, xHLL, xHLH, xHHL, xHHH], dim=1)  # チャネル方向で結合
+        latent = torch_local_backup.cat([xLLL, xLLH, xLHL, xLHH, xHLL, xHLH, xHHL, xHHH], dim=1)  # チャネル方向で結合
 
         # Decoder forward pass
         for level, convs in enumerate(self.decoder):
@@ -2045,7 +2045,7 @@ class Unet11(nn.Module):
                 skip_HHL = x_historyHHL.pop()
                 skip_HHH = x_historyHHH.pop()  
 
-                latent = torch.cat([latent, skip_LLL, skip_LLH, skip_LHL, skip_LHH, skip_HLL, skip_HLH, skip_HHL, skip_HHH], dim=1)  # チャネル方向で結合
+                latent = torch_local_backup.cat([latent, skip_LLL, skip_LLH, skip_LHL, skip_LHH, skip_HLL, skip_HLH, skip_HHL, skip_HHH], dim=1)  # チャネル方向で結合
                 # print(f"After concatenating skip connections: {latent.shape}")  # スキップ接続後の形状を確認
 
         # Remaining convolutions at full resolution
@@ -2440,7 +2440,7 @@ class VxmDense1(LoadableModel):
 
         # init flow layer with small weights and bias
         self.flow.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow.weight.shape))
-        self.flow.bias = nn.Parameter(torch.zeros(self.flow.bias.shape))
+        self.flow.bias = nn.Parameter(torch_local_backup.zeros(self.flow.bias.shape))
 
         # probabilities are not supported in pytorch
         if use_probs:
@@ -2743,15 +2743,15 @@ class Unet_FilterBank2(nn.Module):
         LL_target = apply_3d_filterLL(target.cpu().numpy(), hlfh_kernel)
 
         # Tensor に変換して GPU に戻す
-        LL_source = torch.tensor(LL_source, dtype=torch.float32, device=source.device)
-        HH_source = torch.tensor(HH_source, dtype=torch.float32, device=source.device)
+        LL_source = torch_local_backup.tensor(LL_source, dtype=torch_local_backup.float32, device=source.device)
+        HH_source = torch_local_backup.tensor(HH_source, dtype=torch_local_backup.float32, device=source.device)
 
-        LL_target = torch.tensor(LL_target, dtype=torch.float32, device=target.device)
-        HH_target = torch.tensor(HH_target, dtype=torch.float32, device=target.device)
+        LL_target = torch_local_backup.tensor(LL_target, dtype=torch_local_backup.float32, device=target.device)
+        HH_target = torch_local_backup.tensor(HH_target, dtype=torch_local_backup.float32, device=target.device)
    
 
-        xLL = torch.cat([LL_source, LL_target], dim=1)
-        xHH = torch.cat([HH_source, HH_target], dim=1)
+        xLL = torch_local_backup.cat([LL_source, LL_target], dim=1)
+        xHH = torch_local_backup.cat([HH_source, HH_target], dim=1)
 
         # encoder forward pass
         x_historyLL = [xLL]
@@ -2774,7 +2774,7 @@ class Unet_FilterBank2(nn.Module):
             # print(f"After pooling level {level}: {xHH.shape}")  # プーリング後の形状を確認
 
         # 潜在変数を統合
-        latent = torch.cat([xLL, xHH], dim=1)  # チャネル方向で結合
+        latent = torch_local_backup.cat([xLL, xHH], dim=1)  # チャネル方向で結合
         # x_historyHH2 = x_historyHH
         import copy
         x_historyHH2 = [x.detach().clone() for x in x_historyHH]
@@ -2794,7 +2794,7 @@ class Unet_FilterBank2(nn.Module):
                 skip_hh = x_historyHH.pop()
                 # print(f"xHH sdsdsdssdhape: {latent.shape}")
                 # print(f"x_histdsdsdsdoryHH[-1] shape: {skip_hh.shape}")
-                latent = torch.cat([latent, skip_ll, skip_hh], dim=1)  # チャネル方向で結合
+                latent = torch_local_backup.cat([latent, skip_ll, skip_hh], dim=1)  # チャネル方向で結合
                 # print(f"After concatenating skip connections: {latent.shape}")  # スキップ接続後の形状を確認
 
         # Remaining convolutions at full resolution
@@ -2814,7 +2814,7 @@ class Unet_FilterBank2(nn.Module):
                 skip_hh = x_historyHH2.pop()
 
                 # print("Before concatenation（デコーダーの中）:", x.shape, x_history[-1].shape)  # 追加
-                xHH = torch.cat([xHH, skip_hh], dim=1)
+                xHH = torch_local_backup.cat([xHH, skip_hh], dim=1)
                 # print("After concatenation（デコーダーの中）:", x.shape)  # 追加
 
         # remaining convs at full resolution
@@ -2869,7 +2869,7 @@ class VxmDense2(LoadableModel):
 
         # init flow layer with small weights and bias
         self.flow.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow.weight.shape))
-        self.flow.bias = nn.Parameter(torch.zeros(self.flow.bias.shape))
+        self.flow.bias = nn.Parameter(torch_local_backup.zeros(self.flow.bias.shape))
 
         # probabilities are not supported in pytorch
         if use_probs:

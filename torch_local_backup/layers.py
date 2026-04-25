@@ -16,7 +16,7 @@
 # 画像に適用したり，必要に応じて積分したり，解像度を合わせたりする必要がある。
 # このファイルは，そのための中核処理をまとめたもの。
 # ============================================================
-import torch
+import torch_local_backup
 import torch.nn as nn
 import torch.nn.functional as nnf
 
@@ -39,15 +39,15 @@ class SpatialTransformer(nn.Module):
 
         # 画像全体の各座標を表す基準グリッドを作る
         # 各軸について 0, 1, 2, ... の座標列を作る
-        vectors = [torch.arange(0, s) for s in size]
+        vectors = [torch_local_backup.arange(0, s) for s in size]
         # 各軸の座標列から，N次元の格子座標を作る
-        grids = torch.meshgrid(vectors)
+        grids = torch_local_backup.meshgrid(vectors)
         # 軸ごとの座標をまとめて 1つのテンソルにする
-        grid = torch.stack(grids)
+        grid = torch_local_backup.stack(grids)
         # 先頭にバッチ次元を追加して扱いやすくする
-        grid = torch.unsqueeze(grid, 0)
+        grid = torch_local_backup.unsqueeze(grid, 0)
         # 補間計算で使えるように float 型へ変換する
-        grid = grid.type(torch.FloatTensor)
+        grid = grid.type(torch_local_backup.FloatTensor)
 
         # grid は学習パラメータではないが，モデルと一緒に保持したい値なので
         # register_buffer で登録している。
