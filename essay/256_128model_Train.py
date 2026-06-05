@@ -182,8 +182,21 @@ def haar_wavelet_3d(x):
 
     analysis_filters = _haar_kernels_3d(x.device, x.dtype)
 
-    # フィルタリングと2倍ダウンサンプリングをstride=2で同時に行う。
-    return F.conv3d(x, analysis_filters, stride=2)
+    # ① Analysisフィルタのみ
+    y = F.conv3d(
+        x,
+        analysis_filters,
+        stride=1
+    )
+
+    print("Analysis:", y.shape)
+
+    # ② Downsampling
+    y = y[:, :, 0::2, 0::2, 0::2]
+
+    print("Downsample:", y.shape)
+
+    return y
 
 
 def inverse_haar_wavelet_3d(x):
