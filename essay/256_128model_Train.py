@@ -140,82 +140,66 @@ transformer256 = vxm.layers.SpatialTransformer((128, 256, 256)).to(device)
 
 # ーーーーーーーーーーーーーーーーーーーーーーー
 
+import math
 import torch
+import torch.nn.functional as F
+
+
+def _haar_kernels_3d(device, dtype):
+    """3次元直交Haarの8個のAnalysis/Synthesisフィルタを作成する。"""
+    low = torch.tensor([1.0, 1.0], device=device, dtype=dtype) / math.sqrt(2.0)
+    high = torch.tensor([1.0, -1.0], device=device, dtype=dtype) / math.sqrt(2.0)
+
+    kernels = []
+    for f_d, f_h, f_w in (
+        (low, low, low),
+        (low, low, high),
+        (low, high, low),
+        (low, high, high),
+        (high, low, low),
+        (high, low, high),
+        (high, high, low),
+        (high, high, high),
+    ):
+        kernel = torch.einsum('i,j,k->ijk', f_d, f_h, f_w)
+        kernels.append(kernel)
+
+    return torch.stack(kernels, dim=0).unsqueeze(1)  # (8, 1, 2, 2, 2)
+
 
 def haar_wavelet_3d(x):
     """
-    x: torch.Tensor (B,1,D,H,W)
-    return: torch.Tensor (B,8,D/2,H/2,W/2)
+    3次元Haar Analysisフィルタバンク。
+
+    x: (B, 1, D, H, W)
+    return: (B, 8, D/2, H/2, W/2)
     """
+    if x.ndim != 5 or x.shape[1] != 1:
+        raise ValueError(f'x must have shape (B, 1, D, H, W), but got {tuple(x.shape)}')
 
-    # 偶数・奇数インデックス
-    x000 = x[:, :, 0::2, 0::2, 0::2]
-    x001 = x[:, :, 0::2, 0::2, 1::2]
-    x010 = x[:, :, 0::2, 1::2, 0::2]
-    x011 = x[:, :, 0::2, 1::2, 1::2]
-    x100 = x[:, :, 1::2, 0::2, 0::2]
-    x101 = x[:, :, 1::2, 0::2, 1::2]
-    x110 = x[:, :, 1::2, 1::2, 0::2]
-    x111 = x[:, :, 1::2, 1::2, 1::2]
+    if any(size % 2 != 0 for size in x.shape[2:]):
+        raise ValueError(f'D, H, W must all be even, but got {tuple(x.shape[2:])}')
 
-    # Haar 係数（正規化つき）
-    LLL = (x000 + x001 + x010 + x011 + x100 + x101 + x110 + x111) / 8
-    LLH = (x000 - x001 + x010 - x011 + x100 - x101 + x110 - x111) / 8
-    LHL = (x000 + x001 - x010 - x011 + x100 + x101 - x110 - x111) / 8
-    LHH = (x000 - x001 - x010 + x011 + x100 - x101 - x110 + x111) / 8
-    HLL = (x000 + x001 + x010 + x011 - x100 - x101 - x110 - x111) / 8
-    HLH = (x000 - x001 + x010 - x011 - x100 + x101 - x110 + x111) / 8
-    HHL = (x000 + x001 - x010 - x011 - x100 - x101 + x110 + x111) / 8
-    HHH = (x000 - x001 - x010 + x011 - x100 + x101 + x110 - x111) / 8
+    analysis_filters = _haar_kernels_3d(x.device, x.dtype)
 
-    return torch.cat(
-        [LLL, LLH, LHL, LHH, HLL, HLH, HHL, HHH],
-        dim=1
-    )
+    # フィルタリングと2倍ダウンサンプリングをstride=2で同時に行う。
+    return F.conv3d(x, analysis_filters, stride=2)
+
 
 def inverse_haar_wavelet_3d(x):
     """
-    x: torch.Tensor (B,8,D/2,H/2,W/2)
-    return: torch.Tensor (B,1,D,H,W)
+    3次元Haar Synthesisフィルタバンク。
+
+    x: (B, 8, D/2, H/2, W/2)
+    return: (B, 1, D, H, W)
     """
+    if x.ndim != 5 or x.shape[1] != 8:
+        raise ValueError(f'x must have shape (B, 8, D, H, W), but got {tuple(x.shape)}')
 
-    B, _, D, H, W = x.shape
-    device = x.device
+    synthesis_filters = _haar_kernels_3d(x.device, x.dtype)
 
-    LLL, LLH, LHL, LHH, HLL, HLH, HHL, HHH = torch.chunk(x, 8, dim=1)
-
-    out = torch.zeros(
-        (B, 1, D * 2, H * 2, W * 2),
-        device=device,
-        dtype=x.dtype
-    )
-
-    out[:, :, 0::2, 0::2, 0::2] = (
-        LLL + LLH + LHL + LHH + HLL + HLH + HHL + HHH
-    )
-    out[:, :, 0::2, 0::2, 1::2] = (
-        LLL - LLH + LHL - LHH + HLL - HLH + HHL - HHH
-    )
-    out[:, :, 0::2, 1::2, 0::2] = (
-        LLL + LLH - LHL - LHH + HLL + HLH - HHL - HHH
-    )
-    out[:, :, 0::2, 1::2, 1::2] = (
-        LLL - LLH - LHL + LHH + HLL - HLH - HHL + HHH
-    )
-    out[:, :, 1::2, 0::2, 0::2] = (
-        LLL + LLH + LHL + LHH - HLL - HLH - HHL - HHH
-    )
-    out[:, :, 1::2, 0::2, 1::2] = (
-        LLL - LLH + LHL - LHH - HLL + HLH - HHL + HHH
-    )
-    out[:, :, 1::2, 1::2, 0::2] = (
-        LLL + LLH - LHL - LHH - HLL - HLH + HHL + HHH
-    )
-    out[:, :, 1::2, 1::2, 1::2] = (
-        LLL - LLH - LHL + LHH - HLL + HLH + HHL - HHH
-    )
-
-    return out
+    # 2倍アップサンプリングとSynthesisフィルタリングを同時に行う。
+    return F.conv_transpose3d(x, synthesis_filters, stride=2)
 
 # ーーーーーーーーーーーーーーーーーーーーーーー
 
