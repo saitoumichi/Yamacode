@@ -211,8 +211,38 @@ def inverse_haar_wavelet_3d(x):
 
     synthesis_filters = _haar_kernels_3d(x.device, x.dtype)
 
-    # 2倍アップサンプリングとSynthesisフィルタリングを同時に行う。
-    return F.conv_transpose3d(x, synthesis_filters, stride=2)
+    B, C, D, H, W = x.shape
+
+    # ① Upsampling（偶数位置に元の値を置き，それ以外は0）
+    up = torch.zeros(
+        (B, C, D * 2, H * 2, W * 2),
+        device=x.device,
+        dtype=x.dtype
+    )
+    up[:, :, 0::2, 0::2, 0::2] = x
+
+    print('Upsample:', up.shape)
+
+    # ② Synthesisフィルタリング
+    # conv_transpose3d(stride=2) と同じ処理を，0挿入後の配置として明示的に書く。
+    out = torch.zeros(
+        (B, 1, D * 2, H * 2, W * 2),
+        device=x.device,
+        dtype=x.dtype
+    )
+
+    for c in range(C):
+        for kd in range(2):
+            for kh in range(2):
+                for kw in range(2):
+                    out[:, :, kd::2, kh::2, kw::2] += (
+                        up[:, c:c+1, 0::2, 0::2, 0::2]
+                        * synthesis_filters[c, 0, kd, kh, kw]
+                    )
+
+    print('Synthesis:', out.shape)
+
+    return out
 
 # ーーーーーーーーーーーーーーーーーーーーーーー
 
